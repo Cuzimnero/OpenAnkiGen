@@ -1,4 +1,5 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -15,7 +16,8 @@ class TestPdfHandler(unittest.TestCase):
         self.doc = fitz.open()
         for i in range(3):
             page = self.doc.new_page()
-            page.insert_text((50, 72), f"This is page {i + 1}.")
+            page.insert_text((50, 50), f"Section {i + 1}", fontsize=20)
+            page.insert_text((50, 82), f"This is page {i + 1}.", fontsize=11)
         self.doc.save(str(self.test_pdf_path))
         self.doc.close()
         # Initialize the handler for each test
@@ -76,6 +78,7 @@ class TestPdfHandler(unittest.TestCase):
         # Reload the document to verify that the page is not deleted from the file
         self.handler.doc_reload()
         self.assertEqual(self.handler.pages, 3)
+        self.assertEqual(self.handler.current_page, 0)
 
     def test_05_doc_reload(self):
         """Test if doc_reload correctly reloads the document."""
@@ -88,6 +91,66 @@ class TestPdfHandler(unittest.TestCase):
         self.handler.current_page = 0
         text = self.handler.get_pdf_page()
         self.assertIn("This is page 1", text)
+
+    def test_06_render_page_is_size_bounded(self):
+        """Preview rendering keeps image memory independent of total page count."""
+        image = self.handler.render_page(0, max_width=320, max_height=240)
+        self.assertIsInstance(image, Image.Image)
+        self.assertLessEqual(image.width, 320)
+        self.assertLessEqual(image.height, 240)
+
+        with self.assertRaises(ValueError):
+            self.handler.render_page(99)
+
+        with self.assertRaises(ValueError):
+            self.handler.render_page(-1)
+
+    def test_07_concurrent_previews_are_safe_and_bounded(self):
+        """Concurrent preview requests do not corrupt the shared PDF document."""
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            images = list(executor.map(
+                lambda page: self.handler.render_page(page, max_width=200, max_height=160),
+                range(self.handler.pages),
+            ))
+
+        self.assertEqual(len(images), self.handler.pages)
+        for image in images:
+            self.assertLessEqual(image.width, 200)
+            self.assertLessEqual(image.height, 160)
+
+    def test_08_extracts_layout_and_detects_slide_deck(self):
+        blocks = self.handler.extract_blocks()
+
+        self.assertEqual(len(blocks), 6)
+        self.assertTrue(all({"text", "page", "font_size", "is_bold", "bbox"} <= block.keys()
+                            for block in blocks))
+        self.assertEqual(self.handler.detect_document_type(blocks), "slides")
+
+    def test_09_detects_sections_across_pdf_pages(self):
+        sections = self.handler.detect_sections()
+
+        self.assertEqual([section["title"] for section in sections],
+                         ["Section 1", "Section 2", "Section 3"])
+        self.assertIn("This is page 2.", sections[1]["paragraphs"][0]["text"])
+        self.assertEqual(sections[1]["paragraphs"][0]["page"], 2)
+
+    def test_10_chunks_are_bounded_and_overlap(self):
+        self.handler.detect_sections = lambda: [{
+            "title": "Large section",
+            "paragraphs": [
+                {"text": " ".join(f"alpha{i}" for i in range(220)), "page": 1},
+                {"text": " ".join(f"bridge{i}" for i in range(80)), "page": 2},
+                {"text": " ".join(f"omega{i}" for i in range(220)), "page": 3},
+            ],
+        }]
+
+        chunks = self.handler.create_chunks(max_tokens=400, overlap_tokens=80)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(chunk["text"].split()) <= int(400 / 1.3) for chunk in chunks))
+        self.assertIn("bridge0", chunks[0]["text"])
+        self.assertIn("bridge0", chunks[1]["text"])
+        self.assertEqual(chunks[0]["section_title"], "Large section")
 
 
 if __name__ == '__main__':

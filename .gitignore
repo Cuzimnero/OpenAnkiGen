@@ -16,6 +16,8 @@ dist/
 *.spec
 output/
 /src/ai/model_data
+/local_installer_tool/
+/src/src/
 
 # Logging
 logs/

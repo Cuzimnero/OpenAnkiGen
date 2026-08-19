@@ -15,6 +15,7 @@ from tkinterdnd2 import TkinterDnD
 from ai.anki_gen import AnkiGen
 from ai.model_type import ModelType
 from handler.anki_handler import anki_handler
+from handler.audio_handler import AudiobookGenerator
 from ui.details_window import details_window
 from ui.exclude_window import ExcludeWindow
 from ui.main_ui import main_ui
@@ -65,33 +66,33 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.deleted_pages = []
 
         if getattr(sys, 'frozen', False):
-            self.icon_path = temp_path / "ui" / "logo.ico"
+            self.icon_path = temp_path / "ui" / "logo_v2.ico"
         else:
-            self.icon_path = temp_path / "src" / "ui" / "logo.ico"
+            self.icon_path = temp_path / "src" / "ui" / "logo_v2.ico"
 
         super().__init__()
         self.iconbitmap(str(self.icon_path))
 
         self.title("OpenAnkiGen")
-        self.geometry("600x500")
+        self.geometry("620x620")
         ctk.set_appearance_mode("dark")
         self.key_file = base_path / ".env"
         self.selected_file = None
-        self.generator = AnkiGen(ModelType.API, "", self)
+        load_dotenv(self.key_file)
+        self.api_keys = {
+            ModelType.DEEPSEEK: os.getenv("DEEPSEEK_API_KEY", ""),
+            ModelType.OPENAI: os.getenv("OPENAI_API_KEY", ""),
+            ModelType.ANTHROPIC: os.getenv("ANTHROPIC_API_KEY", ""),
+        }
+        self.key_valid = any(self.api_keys.values())
+        self.chooseMod_state = "normal"
+        self.default_provider = self._default_provider()
+        self.generator = AnkiGen(ModelType.DEEPSEEK, "deepseek-chat", self)
 
         self.logger = logging.getLogger(__name__)
         self.logger.info("Logger started")
 
-        # Checking for api key, loading safed key and data
-        if self.key_file.exists():
-            load_dotenv()
-            self.chooseMod_state = os.getenv("CHOOSE_MOD_STATE", "normal")
-            self.key_valid = os.getenv("KEY_VALID", "False") == "True"
-            self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-            self.text_for_add_key = f"Your API Key {self.api_key}"
-            self.start()
-        else:
-            self.verification.ask_for_key("ENTER THE KEY", False, "I dont have a key")
+        self.start()
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -100,11 +101,30 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.main_ui.show()
         self.update_idletasks()
 
+    def _default_provider(self):
+        if self.api_keys[ModelType.DEEPSEEK]:
+            return "DeepSeek"
+        if self.api_keys[ModelType.OPENAI]:
+            return "OpenAI"
+        if self.api_keys[ModelType.ANTHROPIC]:
+            return "Claude"
+        return "Local Model (Ollama)"
+
     def select_model(self, choice):
         """ Initializes chosen Model. If Ollama is selected, it fetches installed local models and displays a selection menu."""
-        values = {"DeepSeek": ModelType.API, "Local Model (Ollama)": ModelType.LOCALE}
-        model = values.get(choice)
-        if not model:
+        values = {
+            "DeepSeek": (ModelType.DEEPSEEK, "deepseek-chat"),
+            "OpenAI": (ModelType.OPENAI, "gpt-5.6-luna"),
+            "Claude": (ModelType.ANTHROPIC, "claude-haiku-4-5-20251001"),
+            "Local Model (Ollama)": (ModelType.LOCALE, ""),
+        }
+        provider = values.get(choice)
+        if not provider:
+            return
+        model, default_model = provider
+        if model is not ModelType.LOCALE and not self.api_keys.get(model):
+            messagebox.showwarning("API key required", f"Add a {choice} API key first.")
+            self.verification.addKey(choice)
             return
         if model == ModelType.LOCALE:
             try:
@@ -138,7 +158,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 if self.main_ui.file_btn.winfo_exists():
                     self.main_ui.file_btn.configure(state="normal")
                     self.main_ui.destroy_local_mod()
-            self.generator = AnkiGen(model, "", self)
+            self.generator = AnkiGen(model, default_model, self)
 
     def set_model(self, model: str):
         self.generator.set_model(model)
@@ -161,7 +181,13 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
     def start_generation(self):
         """updates detail page for generation of cards, initialize generation"""
 
-        modeltype = "DeepSeek" if self.generator.model_type is ModelType.API else f"Ollama using {self.generator.model}"
+        provider_names = {
+            ModelType.DEEPSEEK: "DeepSeek",
+            ModelType.OPENAI: "OpenAI",
+            ModelType.ANTHROPIC: "Claude",
+            ModelType.LOCALE: f"Ollama using {self.generator.model}",
+        }
+        modeltype = provider_names[self.generator.model_type]
         self.logger.info(f"generating starts with {self.generator.threshold_value} Threshold: {modeltype}")
         if self.generator.threshold_value > 0.8:
             self.logger.warning(
@@ -172,6 +198,9 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.details_window.start_btn.configure(state="disabled", text="Generating cards...")
         self.details_window.change_button_states("disabled")
+        self.create_audiobook = self.details_window.audiobook_enabled.get()
+        self.audiobook_language = self.details_window.language_switch.get()
+        self.audiobook_path = None
 
         thread = threading.Thread(target=self.run_gen)
         self.details_window.start_progress_bar()
@@ -181,7 +210,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def run_gen(self):
         """generates cards"""
-        if self.generator.model == "no models installed" and self.generator.model_type == 2:
+        if self.generator.model == "no models installed" and self.generator.model_type is ModelType.LOCALE:
             messagebox.showerror("Error", "Please install a model first (e.g., 'ollama pull llama3')")
             return
         for page in self.pages_to_delete_sorted:
@@ -203,6 +232,26 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         handler.add_fields(cards)
         output_path = base_path / "output"
         output_path.mkdir(exist_ok=True)
+
+        if self.create_audiobook:
+            self.after(0, lambda: self.details_window.info_label.configure(text="Creating local audiobook …"))
+            try:
+                tts_model_root = (self.temp_path / "ai" / "tts_models" if getattr(sys, "frozen", False)
+                                  else self.temp_path / "src" / "ai" / "tts_models")
+                self.audiobook_path = AudiobookGenerator(tts_model_root).create(
+                    cards,
+                    output_path,
+                    deck_name,
+                    self.audiobook_language,
+                )
+                self.logger.info("Audiobook created: %s", self.audiobook_path)
+            except Exception as error:
+                self.logger.error("Audiobook generation failed: %s", error)
+                self.after(0, lambda: messagebox.showwarning(
+                    "Audiobook unavailable",
+                    "The Anki deck was created, but the local audiobook could not be generated. "
+                    "See the log for details.",
+                ))
         handler.safe_tofile(output_path)
         self.after(0, self.finish)
 
@@ -211,7 +260,10 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         if self.details_window.winfo_exists():
             self.details_window.destroy()
         self.main_ui.change_button_states("normal")
-        messagebox.showinfo("AnkiGen", "Generation successful!")
+        message = "Generation successful!"
+        if self.audiobook_path:
+            message += f"\n\nAudiobook:\n{self.audiobook_path}"
+        messagebox.showinfo("AnkiGen", message)
 
     def on_closing(self):
         self.logger.info("Application closed")

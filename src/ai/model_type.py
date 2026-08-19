@@ -2,7 +2,9 @@ from enum import Enum, auto
 
 
 class ModelType(Enum):
-    API = auto()
+    DEEPSEEK = auto()
+    OPENAI = auto()
+    ANTHROPIC = auto()
     LOCALE = auto()
 
 

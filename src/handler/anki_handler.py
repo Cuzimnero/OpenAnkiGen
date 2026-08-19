@@ -1,6 +1,7 @@
 import html
 import os
 import random
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -85,6 +86,13 @@ class anki_handler:
             return ", ".join(map(str, data))
         return str(data)
 
+    def normalize_mathjax(self, data):
+        """Convert common dollar-delimited model output to Anki MathJax markup."""
+        text = self.clean_field(data)
+        text = re.sub(r"\$\$(.+?)\$\$", r"\\[\1\\]", text, flags=re.DOTALL)
+        text = re.sub(r"(?<!\\)\$(?!\$)(.+?)(?<!\\)\$", r"\\(\1\\)", text, flags=re.DOTALL)
+        return text
+
     def add_fields(self, cards: list[dict]):
         """adding cards to deck"""
         for card in cards:
@@ -94,8 +102,8 @@ class anki_handler:
             node = genanki.Note(
                 model=self.model,
                 fields=[
-                    html.escape(self.clean_field(front)),
-                    html.escape(self.clean_field(back)),
+                    html.escape(self.normalize_mathjax(front)),
+                    html.escape(self.normalize_mathjax(back)),
                     html.escape(self.clean_field(topic))
                 ]
             )
