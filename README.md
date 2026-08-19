@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Cuzimnero/AnkiAI/releases/latest"><strong>Download for Windows</strong></a>
+  <a href="https://github.com/Cuzimnero/OpenAnkiGen/releases/latest"><strong>Download for Windows</strong></a>
   ·
   <a href="#features">Features</a>
   ·
@@ -42,7 +42,7 @@ preferred AI provider, remove semantic duplicates and export a ready-to-import A
 
 ## Install on Windows
 
-1. Open the [latest release](https://github.com/Cuzimnero/AnkiAI/releases/latest).
+1. Open the [latest release](https://github.com/Cuzimnero/OpenAnkiGen/releases/latest).
 2. Download `OpenAnkiGen-Setup.exe`.
 3. Run the installer and launch OpenAnkiGen from the Start menu.
 4. Add an API key or select a locally installed Ollama model.
@@ -84,8 +84,8 @@ After every question, listeners receive ten seconds to think while a subtle cloc
 ## Development
 
 ```powershell
-git clone https://github.com/Cuzimnero/AnkiAI.git
-cd AnkiAI
+git clone https://github.com/Cuzimnero/OpenAnkiGen.git
+cd OpenAnkiGen
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
