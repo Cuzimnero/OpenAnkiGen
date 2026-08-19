@@ -1,89 +1,106 @@
-# OpenAnkiGen 🧠
+<p align="center">
+  <img src="../src/ui/assets/logo_v2.png" width="120" alt="OpenAnkiGen logo">
+</p>
 
-OpenAnkiGen is a powerful tool designed to streamline your learning workflow by leveraging DeepSeek AI to generate
-flashcards
-for Anki.
+<h1 align="center">OpenAnkiGen</h1>
 
----
+<p align="center">
+  Turn PDFs into focused Anki decks — with section-aware generation, duplicate filtering and an optional local audiobook.
+</p>
 
-## ⚠️ Notes
-
-* **AI Determinism:** Please be aware that Large Language Models (LLMs) are non-deterministic by nature. This means that
-  for the same input, the results—including the number of cards, level of detail, and formatting—may vary between runs.
-* **OS Support:** Currently supports Windows only.
-* **Local Execution (Ollama):** Running models locally ensures 100% privacy, but it involves significant hardware and
-  performance trade-offs:
-    * **System Resources:** Generation is resource-intensive and relies heavily on your hardware. A minimum of 8 GB VRAM
-      is recommended for a smooth experience. Running out of VRAM (Video RAM) will significantly degrade performance or
-      can cause hallucination, the application to crash.
-    * **Performance:** Local inference takes significantly longer than cloud-based APIs. Expect a slower "
-      cards-per-minute" rate depending on your system's power.
+<p align="center">
+  <a href="https://github.com/Cuzimnero/AnkiAI/releases/latest"><strong>Download for Windows</strong></a>
+  ·
+  <a href="#features">Features</a>
+  ·
+  <a href="#development">Development</a>
+</p>
 
 ---
 
-## 🤖 Recommended Local Models
+## A focused PDF-to-Anki workflow
 
-You can use every Model which supports tool calls.
-For the best balance between speed and logic when generating Anki cards via Ollama, I recommend:
+OpenAnkiGen keeps the full workflow in one place: choose a PDF, exclude irrelevant pages, generate cards with your
+preferred AI provider, remove semantic duplicates and export a ready-to-import Anki deck.
 
-* **Llama 3.1 (8B):** Currently the best all-rounder. Fast, reliable, and follows complex instructions well.
-* **Mistral-Nemo (12B):** Excellent for longer lecture notes and very stable in maintaining JSON formatting.
-* **Qwen 2.5 (7B):** A highly capable model that excels at logical extraction and technical definitions.
+| Main window | Deck configuration |
+|:---:|:---:|
+| ![Main window](docs/images/main-window.png) | ![Deck configuration](docs/images/detail-window.png) |
 
----
+![Exclude PDF pages](docs/images/exclude-window.png)
 
-## ✨ Features
+## Features
 
-* **DeepSeek Integration:** Uses DeepSeek's powerful LLM to extract and format knowledge into flashcards.
-* **Ollama Integration:** Support for local LLMs via Ollama ensures your data never leaves your machine.
-* **Direct Export:** Generates files ready for Anki import (no additional plugins like AnkiConnect required).
-* **Smart Formatting:** Automatically structures complex information into concise Q&A pairs.
-* **Smart Duplicate Filtering:** Integrated an adjustable Embedding Threshold to control card density. Easily balance
-  between maximum content coverage (lower threshold)
-  and strictly unique flashcards (higher threshold) to avoid redundant information.
+- **Multiple AI providers:** DeepSeek, OpenAI, Claude or a local Ollama model.
+- **Section-aware PDF processing:** Detects headings and keeps related content together across pages.
+- **Direct Anki export:** Produces an `.apkg` file without requiring AnkiConnect.
+- **Semantic duplicate filtering:** Adjustable embedding threshold for controlling card density.
+- **Formula support:** Normalizes generated formulas to Anki MathJax syntax.
+- **Page exclusion:** Fast, memory-bounded previews even for very large PDFs.
+- **Local audiobook:** Piper voices read questions and answers with a ten-second thinking pause and a quiet clock tick.
+- **Private local mode:** With Ollama and Piper, generation and speech can stay on your computer.
 
----
+## Install on Windows
+
+1. Open the [latest release](https://github.com/Cuzimnero/AnkiAI/releases/latest).
+2. Download `OpenAnkiGen-Setup.exe`.
+3. Run the installer and launch OpenAnkiGen from the Start menu.
+4. Add an API key or select a locally installed Ollama model.
+
+Windows may display a SmartScreen warning until releases are code-signed.
 
 ## How it works
 
 ```mermaid
-flowchart TD
-    A[PDF] -->|Extracting PDF Slide 1| B(LLM Gen-Agent Instance 1)
-    A[PDF] -->|Extracting PDF Slide 2 . . .| C(LLM Gen-Agent Instance 2 ..)
-    A[PDF] -->|Extracting PDF Slide N| D(LLM Gen-Agent Instance N)
-    B[LLM Gen-Agent Instance 1] -->|Generating Flash Cards| E(Result Collection)
-    C[LLM Gen-Agent Instance 2 ..] -->|Generating Flash Cards| E(Result Collection)
-    D[LLM Gen-Agent Instance N] -->|Generating Flash Cards| E(Result Collection)
-    E -->|Equal Parts| F(LLM Rework Agent 1)
-    E -->|Equal Parts| G(LLM Rework Agent 2 ...)
-    E -->|Equal Parts| H(LLM Rework Agent N)
-    F -->|Well cards| I(Reworked Cards)
-    G -->|Well cards| I(Reworked Cards)
-    H -->|Well cards| I(Reworked Cards)
-    F -->|Worse cards + Rework - Reason| J(Improver Agent)
-    G -->|Worse cards + Rework - Reason| J(Improver Agent)
-    H -->|Worse cards + Rework - Reason| J(Improver Agent)
-    J -->|Improved cards| I
-    I --> L(Embedding LLM)
-    L --> S(Cosine Similarity Matrix)
-    S -->|Deleting similar Cards| O(Flashcards)
-   ```
+flowchart LR
+    PDF[PDF] --> Pages[Page selection]
+    Pages --> Sections[Logical sections]
+    Sections --> AI[AI card generation]
+    AI --> Review[Quality review]
+    Review --> Dedupe[Duplicate filtering]
+    Dedupe --> Anki[Anki deck]
+    Dedupe --> Audio[Optional audiobook]
+```
 
-## 🚀 Getting Started
+Large sections are split at natural paragraph boundaries with a small overlap. The model receives the section title and
+source range as context, while cards remain clean and independent from page numbers.
 
-### Prerequisites
+## AI providers
 
-* Python 3.10+
-* A DeepSeek API Key     https://platform.deepseek.com/api_keys
-* Anki (for importing the generated cards)
+| Provider | Use case | Data location |
+|---|---|---|
+| DeepSeek | Cost-effective cloud generation | Cloud API |
+| OpenAI | Strong general-purpose generation | Cloud API |
+| Claude | Long-form and structured material | Cloud API |
+| Ollama | Private, offline-capable generation | Local computer |
 
-### Installation
+API keys are stored locally in the installation directory and are never included in builds or releases.
 
-1. **Clone the repository:**
-   ```bash
-   git clone [https://github.com/Cuzimnero/AnkiAI.git](https://github.com/Cuzimnero/OpenAnkiGen.git)
-   cd OpenAnkiGen
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   
+## Local audiobook
+
+The optional audiobook uses project-local Piper ONNX voices. Mathematical expressions are removed from narration.
+After every question, listeners receive ten seconds to think while a subtle clock ticks before the answer begins.
+
+## Development
+
+```powershell
+git clone https://github.com/Cuzimnero/AnkiAI.git
+cd AnkiAI
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python .\src\ui\app.py
+```
+
+Run the tests with:
+
+```powershell
+python -m pytest -q
+```
+
+## Notes
+
+- Windows is currently the supported desktop platform.
+- AI output is non-deterministic and generated cards should be reviewed before studying.
+- Local model performance depends on the selected Ollama model and available hardware.
+- The installer is intentionally large because local embedding and speech models are bundled.

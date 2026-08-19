@@ -19,18 +19,55 @@ class main_ui:
         self.app_instance = app_instance
         self.logger = logging.getLogger(__name__)
 
-        self.main_frame = ctk.CTkFrame(self.app_instance)
-        self.addKey_button = ctk.CTkButton(self.main_frame, text=self.app_instance.text_for_add_key,
-                                           fg_color="transparent",
-                                           command=self.app_instance.verification.addKey, text_color="darkgreen")
-        self.title_label = ctk.CTkLabel(self.main_frame, text="OpenAnkiGen",
-                                        font=ctk.CTkFont(family="Courier", size=50, weight="bold"),
-                                        text_color="#3498db")
-        self.modelFrame = ctk.CTkFrame(self.main_frame, border_color="#4a4a4a", border_width=4, width=300, height=180)
-        self.Modelabel = ctk.CTkLabel(self.modelFrame, text="Select Model", )
-        self.chooseMod = ctk.CTkOptionMenu(self.modelFrame, values=["DeepSeek", "Local Model (Ollama)"],
+        self.main_frame = ctk.CTkFrame(self.app_instance, fg_color="#111827", corner_radius=0)
+        self.content_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+
+        if getattr(sys, 'frozen', False):
+            logo_path = self.app_instance.temp_path / "ui" / "assets" / "logo_v2.png"
+        else:
+            logo_path = self.app_instance.temp_path / "src" / "ui" / "assets" / "logo_v2.png"
+        logo_source = Image.open(logo_path)
+        self.logo_image = ctk.CTkImage(light_image=logo_source, dark_image=logo_source, size=(72, 72))
+        self.logo_label = ctk.CTkLabel(self.content_frame, text="", image=self.logo_image)
+
+        self.title_label = ctk.CTkLabel(
+            self.content_frame,
+            text="OpenAnkiGen",
+            font=ctk.CTkFont(family="Segoe UI", size=38, weight="bold"),
+            text_color="#60a5fa"
+        )
+        self.subtitle_label = ctk.CTkLabel(
+            self.content_frame,
+            text="Turn your PDF notes into focused Anki cards.",
+            font=ctk.CTkFont(family="Segoe UI", size=14),
+            text_color="#9ca3af"
+        )
+
+        self.modelFrame = ctk.CTkFrame(
+            self.content_frame,
+            fg_color="#1f2937",
+            border_color="#374151",
+            border_width=1,
+            corner_radius=16,
+            width=380,
+            height=160
+        )
+        self.Modelabel = ctk.CTkLabel(
+            self.modelFrame,
+            text="AI model",
+            anchor="w",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color="#f3f4f6"
+        )
+        self.chooseMod = ctk.CTkOptionMenu(self.modelFrame,
+                                           values=["DeepSeek", "OpenAI", "Claude", "Local Model (Ollama)"],
                                            command=self.app_instance.select_model,
-                                           state=self.app_instance.chooseMod_state)
+                                           state=self.app_instance.chooseMod_state,
+                                           height=38,
+                                           corner_radius=9,
+                                           fg_color="#2563eb",
+                                           button_color="#1d4ed8",
+                                           button_hover_color="#1e40af")
         if getattr(sys, 'frozen', False):
             file_icon_path = self.app_instance.temp_path / "ui" / "assets" / "file_select_icon.png"
         else:
@@ -42,26 +79,56 @@ class main_ui:
         except FileNotFoundError:
             messagebox.showerror("File Not Found", "file_icon_path doesn't exist")
 
-        self.file_btn = ctk.CTkButton(self.main_frame, text="",
-                                      height=60, width=300, corner_radius=10,
-                                      command=lambda: self.select_file(True), image=file_icon, hover=False,
-                                      fg_color="transparent")
+        self.file_btn = ctk.CTkButton(
+            self.content_frame,
+            text="  Select a PDF",
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+            height=58,
+            width=380,
+            corner_radius=12,
+            command=lambda: self.select_file(True),
+            image=file_icon,
+            compound="left",
+            fg_color="#2563eb",
+            hover_color="#1d4ed8"
+        )
+        self.hint_label = ctk.CTkLabel(
+            self.content_frame,
+            text="PDF files only  •  You can review pages before generation",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color="#6b7280"
+        )
+        self.addKey_button = ctk.CTkButton(
+            self.content_frame,
+            text=self._key_button_text(),
+            fg_color="transparent",
+            hover_color="#1f2937",
+            command=self.app_instance.verification.addKey,
+            text_color="#9ca3af",
+            font=ctk.CTkFont(family="Segoe UI", size=12)
+        )
+
+    def _key_button_text(self):
+        if self.app_instance.key_valid:
+            return "Manage API keys"
+        return "Add an API key"
 
     def show(self):
-        self.title_label.pack(pady=40)
-        self.addKey_button.pack(pady=20, padx=20, anchor="se", side="bottom")
         self.main_frame.pack(expand=True, fill="both")
+        self.content_frame.place(relx=0.5, rely=0.5, anchor="center")
+        self.logo_label.pack(pady=(0, 5))
+        self.title_label.pack(pady=(0, 2))
+        self.subtitle_label.pack(pady=(0, 24))
         self.modelFrame.pack_propagate(False)
-        self.modelFrame.pack(pady=10)
-        self.Modelabel.pack(pady=10)
-        self.chooseMod.pack(pady=10)
-        self.file_btn.pack(pady=20)
+        self.modelFrame.pack(pady=(0, 18))
+        self.Modelabel.pack(fill="x", padx=22, pady=(20, 10))
+        self.chooseMod.pack(fill="x", padx=22, pady=(0, 20))
+        self.file_btn.pack()
+        self.hint_label.pack(pady=(8, 18))
+        self.addKey_button.pack()
 
-        if not self.app_instance.key_valid:
-            self.app_instance.after(10, lambda: self.app_instance.select_model("Local Model (Ollama)"))
-            if not self.app_instance.ollama_available:
-                self.chooseMod.configure(state="disabled")
-                self.file_btn.configure(state="disabled")
+        self.chooseMod.set(self.app_instance.default_provider)
+        self.app_instance.after(10, lambda: self.app_instance.select_model(self.app_instance.default_provider))
 
     def set_choose_mod(self, mod: str):
         if mod in self.chooseMod.cget("values"):

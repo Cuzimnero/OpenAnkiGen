@@ -4,10 +4,12 @@ import logging
 import math
 import os
 import pathlib
+import re
 import sys
 from typing import TYPE_CHECKING
 
 import customtkinter as ctk
+import httpx
 import ollama
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -31,7 +33,7 @@ class AnkiGen:
         self.model_type = model_type
         self.logger = logging.getLogger(__name__)
         load_dotenv()
-        if self.model_type == ModelType.API:
+        if self.model_type is not ModelType.LOCALE:
             self.workers = 30
             self.rework_size = 50
         else:
@@ -49,13 +51,13 @@ class AnkiGen:
             model_path = os.path.join(sys._MEIPASS, "ai", "model_data")
             self.embedding_model = SentenceTransformer(model_path, local_files_only=True)
         else:
-            model_path = os.path.join("src", "ai", "model_data")
+            model_path = self.app_instance.temp_path / "src" / "ai" / "model_data"
             if not os.path.exists(model_path):
                 self.logger.warning("Model not found. Downloading for the first time...")
                 temp_model = SentenceTransformer('all-MiniLM-L6-v2')
                 temp_model.save(model_path)
                 self.logger.warning(f"Model got saved in  {model_path}")
-            self.embedding_model = SentenceTransformer(model_path)
+            self.embedding_model = SentenceTransformer(str(model_path))
 
     def set_model(self, model: str):
         self.model = model
@@ -97,7 +99,7 @@ class AnkiGen:
              * 'Incomplete Answer': The back provides fewer items than requested (e.g., list of 5 instead of 6).
              * 'Generation Cut-off': The answer ends abruptly mid-sentence or mid-structure.
              * 'Context Leak': Mentions slide numbers,not given examples, page numbers, or "previous sections".
-             * 'Formatting Glitch': Broken LaTeX ($...$) or Markdown syntax.
+             * 'Formatting Glitch': Broken Anki MathJax (\(...\) or \[...\]) or Markdown syntax.
              * 'Answer Mismatch': The back of the card does not provide a direct or accurate answer to the question asked
             - MANDATORY: For every card in the 'rework' list, you MUST provide a 'reason' field 
                 explaining exactly what is wrong (e.g., 'Wall of Text', 'No Question Mark').
@@ -130,7 +132,7 @@ class AnkiGen:
         - 'Incomplete Answer': The back provides fewer items than requested (e.g., list of 5 instead of 6). -> Ensure the back matches the requested number of items.
         - 'Generation Cut-off': The answer ends abruptly mid-sentence or mid-structure. -> Complete the sentence and restore the full logical structure.
         - 'Context Leak': Mentions slide numbers, page numbers, examples or "previous sections". -> Remove all external references to make the card self-contained.
-        - 'Formatting Glitch': Broken LaTeX ($...$) or Markdown syntax. -> Repair the syntax to ensure all elements render correctly.
+        - 'Formatting Glitch': Broken Anki MathJax (\(...\) or \[...\]) or Markdown syntax. -> Repair the syntax to ensure all elements render correctly.
         - 'Answer Mismatch': Problem: The back of the card does not provide a direct, precise, or complete answer to the specific question asked on the front. Revision Approach: Rewrite the answer so it addresses the front exactly. Eliminate irrelevant information and ensure the response leads directly to the core of the question.
         - 'MANDATORY': Every 'front' must be a grammatically correct, self-contained question ending with a question mark; if the input is a statement or a noun, you MUST rephrase it into a 'How', 'What', 'Why', or 'Which' question.
 
@@ -181,14 +183,19 @@ class AnkiGen:
         return embeddet
 
     def createCards(self, language: str, info_label: ctk.CTkLabel):
-        """running different threads for multiple tasks, AI api calls, creating cards"""
+        """Generate cards from layout-aware, overlapping document sections."""
         cards = []
         all_cards = []
+        chunks = self.handler.create_chunks()
+        self.generation_units = len(chunks)
+
+        if not chunks:
+            self.logger.warning("No readable document sections found.")
+            return []
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as executor:
-            for i in range(self.handler.pages):
-                page = self.handler.get_pdf_page()
-                page_cards = executor.submit(self._createCard_part, page, language, i)
+            for chunk in chunks:
+                page_cards = executor.submit(self._createCard_part, chunk, language)
                 cards.append(page_cards)
             for future in concurrent.futures.as_completed(cards):
                 if not self.window_active:
@@ -204,8 +211,14 @@ class AnkiGen:
         final_cards = self.rework(all_cards)
         return final_cards
 
-    def _createCard_part(self, input: str, language: str, page_num: int):
-        self.logger.info(f"Creating {language} cards for page {page_num}")
+    def _createCard_part(self, chunk: dict, language: str):
+        input_text = chunk["text"]
+        section_title = chunk["section_title"]
+        page_range = (str(chunk["page_start"]) if chunk["page_start"] == chunk["page_end"]
+                      else f"{chunk['page_start']}-{chunk['page_end']}")
+        self.logger.info(
+            f"Creating {language} cards for section '{section_title}' (pages {page_range})"
+        )
         system_prompt = r"""
         You are a professional Flashcard creator. 
         Analyze the provided text and extract the core concepts into flashcards.
@@ -222,8 +235,9 @@ class AnkiGen:
           ]
         }
         TECHNICAL FORMATTING:
-        -  Use $...$ for ALL math/technical variables (e.g., $P_n$, $\rho$, $E[T]$).
-        - Ensure valid JSON output. Double-escape backslashes in LaTeX (e.g., \\frac{1}{2}).
+        - Use Anki MathJax delimiters for ALL math/technical variables: \(...\) inline and \[...\] for display math.
+        - Never use dollar-sign delimiters for formulas.
+        - Ensure valid JSON output. Double-escape backslashes in JSON (e.g., \\frac{1}{2}).
         - Topic field must be a high-level category 
         STRICT FRONT-SIDE RULE:
         - Every 'front' MUST start with a question word (What, How, Why, Which, etc.).
@@ -241,6 +255,10 @@ class AnkiGen:
 
         user_prompt = f"""
         Convert the following lecture notes into necessary high-quality Anki cards use all important things.
+        SECTION CONTEXT:
+        - Section title: {section_title}
+        - Internal source pages: {page_range}
+        - Use the section title to resolve context, but NEVER mention page numbers or the source document in a card.
         LANGUAGE RULE:
         - All content (front, back, topic) MUST be in {language}. If {language} is "default", use the primary language found in the provided text. Do not translate technical terms that are commonly used in their original form.
         STRICT RULES:
@@ -252,77 +270,99 @@ class AnkiGen:
         6. Ignore Example calculations and examples in general
          
         ---
-        {input}
+        {input_text}
         
         ---
         """
         return self.run_prompt(system_prompt, user_prompt, "generation error", CallType.CARD_GENERATION)
 
-    def run_prompt(self, system_prompt: str, user_prompt: str, error_message: str, mode: CallType):
-        final_cards = []
-        if not self.window_active:
+    def _parse_json_text(self, content: str):
+        content = content.strip()
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE)
+        return json.loads(content)
+
+    def _advance_progress(self, mode: CallType):
+        self.progress += 1
+        window = getattr(self.app_instance, "details_window", None)
+        if not window or not hasattr(window, "bar"):
             return
-        if self.model_type is ModelType.API:
-            client = OpenAI(
-                api_key=self.app_instance.api_key,
-                base_url="https://api.deepseek.com"
-            )
+        denominator = (max(1, self.generation_units) if mode is CallType.CARD_GENERATION
+                       else max(1, self.rework_iterations))
+        value = self.progress / denominator
+        window.after(0, lambda: window.bar.set(value))
 
-            try:
-                messages = [{"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}]
-                params = {
-                    "model": "deepseek-chat",
-                    "messages": messages,
-                    "stream": False,
-                    "response_format": {"type": "json_object"}
-                }
-                response = client.chat.completions.create(**params)
-                data = json.loads(response.choices[0].message.content)
-                window = getattr(self.app_instance, "details_window", None)
-                if window and (
-                        mode is CallType.CARD_GENERATION or mode is CallType.CARD_IMPROVEMENT):
-                    final_cards.extend(data.get("cards", []))
-                    self.progress = self.progress + 1
-                    if mode is CallType.CARD_GENERATION:
-                        self.app_instance.details_window.bar.set(self.progress / self.handler.pages)
-                    else:
-                        self.app_instance.details_window.bar.set(self.progress / self.rework_iterations)
+    def _cards_from_response(self, data: dict, mode: CallType):
+        if mode in (CallType.CARD_GENERATION, CallType.CARD_IMPROVEMENT):
+            self._advance_progress(mode)
+            return data.get("cards", [])
 
-
-                else:
-                    well_cards = data.get("keep", [])
-                    cards_to_improve = data.get("rework", [])
-                    final_cards.extend(well_cards)
-                    if cards_to_improve:
-                        final_cards.extend(self.rework_flashcard(cards_to_improve))
-
-            except Exception as e:
-                self.logger.error(f"{error_message} {e}")
-                return []
-
-        elif self.model_type is ModelType.LOCALE:
-            try:
-                response = ollama.chat(model=self.model, format='json', options={"num_ctx": 4096},
-                                       messages=[{"role": "system", "content": system_prompt},
-                                                 {"role": "user", "content": user_prompt}])
-                data = json.loads(response.message.content)
-                window = getattr(self.app_instance, "details_window", None)
-                if window and (
-                        mode is CallType.CARD_GENERATION or mode is CallType.CARD_IMPROVEMENT):
-                    final_cards.extend(data.get("cards", []))
-                    self.progress = self.progress + 1
-                    if mode is CallType.CARD_GENERATION:
-                        self.app_instance.details_window.bar.set(self.progress / self.handler.pages)
-                    else:
-                        self.app_instance.details_window.bar.set(self.progress / self.rework_iterations)
-                else:
-                    cards_to_improve = data.get("rework", [])
-                    if cards_to_improve:
-                        final_cards.extend(self.rework_flashcard(cards_to_improve))
-                    final_cards.extend(data.get("keep", []))
-
-            except Exception as e:
-                self.logger.error(f"{error_message} {e}")
-                return []
+        final_cards = list(data.get("keep", []))
+        cards_to_improve = data.get("rework", [])
+        if cards_to_improve:
+            final_cards.extend(self.rework_flashcard(cards_to_improve))
         return final_cards
+
+    def run_prompt(self, system_prompt: str, user_prompt: str, error_message: str, mode: CallType):
+        if not self.window_active:
+            return []
+        try:
+            if self.model_type in (ModelType.DEEPSEEK, ModelType.OPENAI):
+                key = self.app_instance.api_keys[self.model_type]
+                client_kwargs = {"api_key": key}
+                if self.model_type is ModelType.DEEPSEEK:
+                    client_kwargs["base_url"] = "https://api.deepseek.com"
+                client = OpenAI(**client_kwargs)
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    stream=False,
+                    response_format={"type": "json_object"},
+                )
+                data = self._parse_json_text(response.choices[0].message.content)
+
+            elif self.model_type is ModelType.ANTHROPIC:
+                response = httpx.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": self.app_instance.api_keys[ModelType.ANTHROPIC],
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 4096,
+                        "system": system_prompt,
+                        "messages": [{"role": "user", "content": user_prompt}],
+                    },
+                    timeout=180,
+                )
+                response.raise_for_status()
+                response_data = response.json()
+                text_content = "".join(
+                    block.get("text", "") for block in response_data.get("content", [])
+                    if block.get("type") == "text"
+                )
+                data = self._parse_json_text(text_content)
+
+            elif self.model_type is ModelType.LOCALE:
+                response = ollama.chat(
+                    model=self.model,
+                    format="json",
+                    options={"num_ctx": 4096},
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+                data = self._parse_json_text(response.message.content)
+            else:
+                raise ValueError(f"Unsupported model provider: {self.model_type}")
+
+            return self._cards_from_response(data, mode)
+        except Exception as error:
+            self.logger.error("%s (%s): %s", error_message, self.model_type.name, error)
+            return []

@@ -27,6 +27,22 @@ class TestAnkiHandler(unittest.TestCase):
         self.assertEqual(self.handler.clean_field(["item1", "item2"]), "item1, item2")
         self.assertEqual(self.handler.clean_field(123), "123")
 
+    def test_normalize_mathjax_uses_anki_delimiters(self):
+        value = self.handler.normalize_mathjax(r"Inline $x^2$ and display $$\frac{1}{2}$$")
+
+        self.assertEqual(value, r"Inline \(x^2\) and display \[\frac{1}{2}\]")
+
+    def test_add_fields_normalizes_mathjax_before_export(self):
+        self.handler.add_fields([{
+            "front": r"What is $x^2$?",
+            "back": r"It is $$x \cdot x$$.",
+            "topic": "Math",
+        }])
+
+        note = self.handler.deck.notes[0]
+        self.assertIn(r"\(x^2\)", note.fields[0])
+        self.assertIn(r"\[x \cdot x\]", note.fields[1])
+
     def test_add_fields(self):
         """Test the add_fields method."""
         cards = [
