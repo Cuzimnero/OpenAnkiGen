@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../src/ui/assets/logo_v2.png" width="120" alt="OpenAnkiGen logo">
+  <img src="src/ui/assets/logo_v2.png" width="120" alt="OpenAnkiGen logo">
 </p>
 
 <h1 align="center">OpenAnkiGen</h1>
